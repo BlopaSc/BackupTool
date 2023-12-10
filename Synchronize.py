@@ -4,9 +4,17 @@
 """
 
 import argparse
+import hashlib
 import os
 import shutil
 import sys
+
+def hash_file(filename):
+    file_hash = hashlib.md5()
+    with open(filename, "rb") as f:
+        while chunk := f.read(8388608):
+            file_hash.update(chunk)
+    return file_hash.hexdigest()
 
 def list_files(directory, exclude = []):
     files = list()
@@ -46,10 +54,22 @@ def calculate_differences(srcfiles, dstfiles, srcpath, dstpath):
     add = srcfiles - dstfiles
     remove = dstfiles - srcfiles
     update = set()
+    metadata_repair_src = set()
+    metadata_repair_dst = set()
     for file in srcfiles & dstfiles:
-        if os.path.getmtime(srcpath + '/' + file) != os.path.getmtime(dstpath + '/' + file):
-            update.add(file)
-    return list(add),list(update),list(remove)
+        srctime = os.path.getmtime(srcpath + '/' + file)
+        dsttime = os.path.getmtime(dstpath + '/' + file)
+        if srctime!=dsttime:
+            srchash = hash_file(srcpath + '/' + file)
+            dsthash = hash_file(dstpath + '/' + file)
+            if srchash == dsthash:
+                if srctime<dsttime:
+                    metadata_repair_dst.add(file)
+                else:
+                    metadata_repair_src.add(file)
+            else:
+                update.add(file)
+    return list(add),list(update),list(remove),list(metadata_repair_src),list(metadata_repair_dst)
 
 def copy_file(srcpath, dstpath):
     try:
@@ -67,12 +87,12 @@ def make_directory(path):
 
 def copy_files(files, srcpath, dstpath, verbose):
     for file in files:
-        print(f"Copying: {file}")
+        if verbose: print(f"Copying: {file}")
         copy_file(srcpath + '/' + file, dstpath + '/' + file)
         
 def remove_files(files, dstpath, verbose):
     for file in files:
-        print(f"Removing: {file}")
+        if verbose: print(f"Removing: {file}")
         dstfile = dstpath + '/' + file
         os.remove(dstfile)
         check_directory(dstfile[:dstfile.rfind('/')])
@@ -81,13 +101,24 @@ def check_directory(path):
     if len(os.listdir(path)) == 0:
         os.rmdir(path)
         check_directory(path[:path.rfind('/')])
+        
+def copy_metadata(files, srcpath, dstpath, verbose, typ):
+    for file in files:
+        if verbose: print(f"Repairing {typ} metadata {file}")
+        shutil.copystat(srcpath + '/' + file, dstpath + '/' + file)
+    
+        
+def print_files(typ, files):
+    for file in files:
+        print(f"{typ}: {file}")
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(prog='Synchronize', description='Easy to use backup tool for handling directories. Allows to automatically copy the new and modified files from a source directory into a destination directory; allows to automatically remove no-longer existing files in the source directory that exist on the destination directory.')
-    parser.add_argument('-s', '--src', required=True, help='source directory where the files to backup are stored.')
-    parser.add_argument('-d', '--dst', required=True, help='destination directory where the files to backup will be stored.')
+    parser = argparse.ArgumentParser(prog='Synchronize', description='Easy to use backup tool for handling directories. Allows to automatically copy the new and modified files from a source directory into a destination directory; allows to automatically remove files in the destination directory that no longer exist in the source directory.')
+    parser.add_argument('-s', '--src', required=True, help='source directory from where to read the files to backup.')
+    parser.add_argument('-d', '--dst', required=True, help='destination directory in where to store the files to backup.')
     parser.add_argument('-a', '--apply', action='store_true', help='instead of merely listing the changes that are needed to keep the backup up-to-date, it applies those changes automatically.')
     parser.add_argument('-f', '--force', action='store_true', help='disables the confirmation steps before performing the copy/update/remove operations.')
+    parser.add_argument('-m', '--meta', action='store_true', help='enables metadata repair for files, if two files are identical then the older metadata is copied (applies to both src and dst)')
     parser.add_argument('-v', '--verbose', type=int, default=1, help='specifies the level of verbose to utilize, if the changes are not being applied the minimum verbose is 1.')
     parser.add_argument('-x', '--exclude', default='', help='list of paths separated by ? to exclude from the process both in source and destination.')
     args = parser.parse_args()
@@ -123,9 +154,6 @@ if __name__ == '__main__':
     if srcpath.endswith('/'): srcpath = srcpath[:-1]
     if dstpath.endswith('/'): dstpath = dstpath[:-1]
     
-    srcfiles = list_files(srcpath)
-    dstfiles = list_files(dstpath)
-    
     exclude = [p for p in args.exclude.split('?') if p]
     
     if sys.platform.startswith('win'):
@@ -135,26 +163,34 @@ if __name__ == '__main__':
         separator = '\n\t\t\t'
         print(f"Excluding:\t{separator.join(exclude)}")
     
+    srcfiles = list_files(srcpath)
+    dstfiles = list_files(dstpath)
+    
     srcfiles = filter_files(srcfiles, exclude)
     dstfiles = filter_files(dstfiles, exclude)
     
-    add,update,remove = calculate_differences(srcfiles, dstfiles, srcpath, dstpath)
+    add,update,remove,metadata_repair_src,metadata_repair_dst = calculate_differences(srcfiles, dstfiles, srcpath, dstpath)
     add.sort()
     update.sort()
     remove.sort()
+    metadata_repair_src.sort()
+    metadata_repair_dst.sort()
     
     if verbose>1:
-        print(f"Search found a total of:\n\t\t\t{len(add)} new files\n\t\t\t{len(update)} modified files\n\t\t\t{len(remove)} deleted files")
+        print(f"Search found a total of:\n\t\t\t{len(add)} new files\n\t\t\t{len(update)} modified files\n\t\t\t{len(remove)} deleted files\n\t\t\t{len(metadata_repair_src)} metadata repair files in source\n\t\t\t{len(metadata_repair_dst)} metadata repair files in destination")
         
     if (not args.apply) and args.verbose>0:
-        for file in add:
-            print(f"new: {file}")
-        for file in update:
-            print(f"modified: {file}")
-        for file in remove:
-            print(f"deleted: {file}")
+        print_files("new", add)
+        print_files("modified", update)
+        print_files("deleted", remove)
+        if args.meta:
+            print_files("source repair", metadata_repair_src)
+            print_files("dest repair", metadata_repair_dst)
         
     if args.apply:
+        if len(add)+len(update)+len(remove)+args.meta*len(metadata_repair_src)+args.meta*len(metadata_repair_dst) == 0:
+            if verbose > 1: print("Backup is up-to-date")
+            sys.exit(0)
         apply = True
         if not args.force:
             ans = ''
@@ -164,12 +200,12 @@ if __name__ == '__main__':
                 if ans == 't':
                     print(f"Search found a total of:\n\t\t\t{len(add)} new files\n\t\t\t{len(update)} modified files\n\t\t\t{len(remove)} deleted files")
                 elif ans == 'l':
-                    for file in add:
-                        print(f"new: {file}")
-                    for file in update:
-                        print(f"modified: {file}")
-                    for file in remove:
-                        print(f"deleted: {file}")
+                    print_files("new", add)
+                    print_files("modified", update)
+                    print_files("deleted", remove)
+                    if args.meta:
+                        print_files("source repair", metadata_repair_src)
+                        print_files("dest repair", metadata_repair_dst)
                 elif ans == 'n':
                     apply = False
         if apply:
@@ -177,3 +213,6 @@ if __name__ == '__main__':
             copy_files(add,srcpath,dstpath,verbose=verbose>1)
             copy_files(update,srcpath,dstpath,verbose=verbose>1)
             remove_files(remove,dstpath,verbose=verbose>1)
+            if args.meta:
+                copy_metadata(metadata_repair_src, dstpath, srcpath, verbose=verbose>1, typ='src')
+                copy_metadata(metadata_repair_dst, srcpath, dstpath, verbose=verbose>1, typ='dst')

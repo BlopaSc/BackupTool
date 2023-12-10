@@ -49,7 +49,7 @@ def calculate_differences(srcfiles, dstfiles, srcpath, dstpath):
     for file in srcfiles & dstfiles:
         if os.path.getmtime(srcpath + '/' + file) != os.path.getmtime(dstpath + '/' + file):
             update.add(file)
-    return add,update,remove
+    return list(add),list(update),list(remove)
 
 def copy_file(srcpath, dstpath):
     try:
@@ -117,6 +117,12 @@ if __name__ == '__main__':
     srcpath = args.src
     dstpath = args.dst
     
+    srcpath = srcpath.replace('\\','/')
+    dstpath = dstpath.replace('\\','/')
+    
+    if srcpath.endswith('/'): srcpath = srcpath[:-1]
+    if dstpath.endswith('/'): dstpath = dstpath[:-1]
+    
     srcfiles = list_files(srcpath)
     dstfiles = list_files(dstpath)
     
@@ -133,6 +139,9 @@ if __name__ == '__main__':
     dstfiles = filter_files(dstfiles, exclude)
     
     add,update,remove = calculate_differences(srcfiles, dstfiles, srcpath, dstpath)
+    add.sort()
+    update.sort()
+    remove.sort()
     
     if verbose>1:
         print(f"Search found a total of:\n\t\t\t{len(add)} new files\n\t\t\t{len(update)} modified files\n\t\t\t{len(remove)} deleted files")

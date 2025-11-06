@@ -18,17 +18,25 @@ def hash_file(filename):
 
 def list_files(directory, exclude = []):
     files = list()
+    empty_dirs = list()
     try:
-        for name in os.listdir(directory):
+        lstdir = os.listdir(directory)
+        for name in lstdir:
             cname = directory+'/'+name
             if os.path.isdir(cname):
-                for i in list_files(cname):
-                    files.append(name+'/'+i)
+                child_files, child_empty = list_files(cname)
+                if len(child_files) > 0 or len(child_empty) > 0:
+                    for i in child_files:
+                        files.append(name+'/'+i)
+                    for i in child_empty:
+                        empty_dirs.append(name+'/'+i)
+                else:
+                    empty_dirs.append(name)
             else:
                 files.append(name)
     except PermissionError:
         pass
-    return files
+    return files, empty_dirs
 
 def filter_files(files, exclude):
     files.sort()
@@ -101,7 +109,12 @@ def check_directory(path):
     if len(os.listdir(path)) == 0:
         os.rmdir(path)
         check_directory(path[:path.rfind('/')])
-        
+
+def remove_empty(empty_paths, dstpath, verbose, typ):
+    for path in empty_paths:
+        if verbose: print(f"Removing {typ} empty dir: {path}")
+        check_directory(dstpath + '/' + path)
+    
 def copy_metadata(files, srcpath, dstpath, verbose, typ):
     for file in files:
         if verbose: print(f"Repairing {typ} metadata {file}")
@@ -118,6 +131,7 @@ if __name__ == '__main__':
     parser.add_argument('-d', '--dst', required=True, help='destination directory in where to store the files to backup.')
     parser.add_argument('-a', '--apply', action='store_true', help='instead of merely listing the changes that are needed to keep the backup up-to-date, it applies those changes automatically.')
     parser.add_argument('-f', '--force', action='store_true', help='disables the confirmation steps before performing the copy/update/remove operations.')
+    parser.add_argument('-e', '--empty', action='store_true', help='deletes empty directories in both soure and destination')
     parser.add_argument('-m', '--meta', action='store_true', help='enables metadata repair for files, if two files are identical then the older metadata is copied (applies to both src and dst)')
     parser.add_argument('-v', '--verbose', type=int, default=1, help='specifies the level of verbose to utilize, if the changes are not being applied the minimum verbose is 1.')
     parser.add_argument('-x', '--exclude', default='', help='list of paths separated by ? to exclude from the process both in source and destination.')
@@ -163,8 +177,8 @@ if __name__ == '__main__':
         separator = '\n\t\t\t'
         print(f"Excluding:\t{separator.join(exclude)}")
     
-    srcfiles = list_files(srcpath)
-    dstfiles = list_files(dstpath)
+    srcfiles,srcdirs = list_files(srcpath)
+    dstfiles,dstdirs = list_files(dstpath)
     
     srcfiles = filter_files(srcfiles, exclude)
     dstfiles = filter_files(dstfiles, exclude)
@@ -177,12 +191,22 @@ if __name__ == '__main__':
     metadata_repair_dst.sort()
     
     if verbose>1:
-        print(f"Search found a total of:\n\t\t\t{len(add)} new files\n\t\t\t{len(update)} modified files\n\t\t\t{len(remove)} deleted files\n\t\t\t{len(metadata_repair_src)} metadata repair files in source\n\t\t\t{len(metadata_repair_dst)} metadata repair files in destination")
+        print("Search found a total of:")
+        print(f"\t\t\t{len(add)} new files")
+        print(f"\t\t\t{len(update)} modified files")
+        print(f"\t\t\t{len(remove)} deleted files")
+        print(f"\t\t\t{len(srcdirs)} empty directories in source")
+        print(f"\t\t\t{len(dstdirs)} empty directories in destination")
+        print(f"\t\t\t{len(metadata_repair_src)} metadata repair files in source")
+        print(f"\t\t\t{len(metadata_repair_dst)} metadata repair files in destination")
         
     if (not args.apply) and args.verbose>0:
         print_files("new", add)
         print_files("modified", update)
         print_files("deleted", remove)
+        if args.empty:
+            print_files("source empty dir", srcdirs)
+            print_files("dest empty dir", dstdirs)
         if args.meta:
             print_files("source repair", metadata_repair_src)
             print_files("dest repair", metadata_repair_dst)
@@ -198,11 +222,21 @@ if __name__ == '__main__':
                 ans = input("Do you want to apply the changes?\n\ty - yes\t\tto accept\n\tn - no\t\tto decline\n\tt - totals\tto see the total changes\n\tl - list\tto get the list of all changes\n").lower()
                 if ans: ans = ans[0]
                 if ans == 't':
-                    print(f"Search found a total of:\n\t\t\t{len(add)} new files\n\t\t\t{len(update)} modified files\n\t\t\t{len(remove)} deleted files")
+                    print("Search found a total of:")
+                    print(f"\t\t\t{len(add)} new files")
+                    print(f"\t\t\t{len(update)} modified files")
+                    print(f"\t\t\t{len(remove)} deleted files")
+                    print(f"\t\t\t{len(srcdirs)} empty directories in source")
+                    print(f"\t\t\t{len(dstdirs)} empty directories in destination")
+                    print(f"\t\t\t{len(metadata_repair_src)} metadata repair files in source")
+                    print(f"\t\t\t{len(metadata_repair_dst)} metadata repair files in destination")
                 elif ans == 'l':
                     print_files("new", add)
                     print_files("modified", update)
                     print_files("deleted", remove)
+                    if args.empty:
+                        print_files("source empty dir", srcdirs)
+                        print_files("dest empty dir", dstdirs)
                     if args.meta:
                         print_files("source repair", metadata_repair_src)
                         print_files("dest repair", metadata_repair_dst)
@@ -210,9 +244,14 @@ if __name__ == '__main__':
                     apply = False
         if apply:
             if verbose>1: print("Applying changes:")
+            remove_files(remove,dstpath,verbose=verbose>1)
             copy_files(add,srcpath,dstpath,verbose=verbose>1)
             copy_files(update,srcpath,dstpath,verbose=verbose>1)
-            remove_files(remove,dstpath,verbose=verbose>1)
+            if args.empty:
+                _,srcdirs = list_files(srcpath)
+                _,dstdirs = list_files(dstpath)
+                remove_empty(srcdirs, srcpath, verbose=verbose>1, typ='src')
+                remove_empty(dstdirs, dstpath, verbose=verbose>1, typ='dst')
             if args.meta:
                 copy_metadata(metadata_repair_src, dstpath, srcpath, verbose=verbose>1, typ='src')
                 copy_metadata(metadata_repair_dst, srcpath, dstpath, verbose=verbose>1, typ='dst')

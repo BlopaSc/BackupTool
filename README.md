@@ -31,6 +31,7 @@ With the following arguments:
 - `-x EXCLUDE, --exclude EXCLUDE`: EXCLUDE is a string of different subdirectory paths (using relative addresses) to be excluded. The different paths should be separated by a `?` character. E.g: `-x tests?distribution?source/__temp` would exclude the directories: `tests/`, `distribution/` and `source/__temp`.
 - `-a, --apply`: Apply the proposed changes automatically. By default it will only list the changes that need to be done to keep the backup up-to-date. It will ask confirmation before performing the changes.
 - `-f, --force`: Disables the request for confirmation before applying the changes.
+- `-e, --empty`: Removes any empty directories in both source and destination directories.
 - `-m, --meta`: Checks the metadata integrity of the files, if two files` metadata are different but the files are identical it will overwrite the newest metadata with the oldest of th two.
 - `-v VERBOSE, --verbose VERBOSE`: Specifies the level of verbose to utilize: at level 0 nothing is printed, at level 1 only the proposed changes are printed, at level 2 the entire process is printed. By default is 0. If not `--apply` then the minimum is 1.
 

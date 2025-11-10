@@ -16,7 +16,7 @@ def hash_file(filename):
             file_hash.update(chunk)
     return file_hash.hexdigest()
 
-def list_files(directory, exclude = []):
+def list_files(directory):
     files = list()
     empty_dirs = list()
     try:
@@ -182,6 +182,8 @@ if __name__ == '__main__':
     
     srcfiles = filter_files(srcfiles, exclude)
     dstfiles = filter_files(dstfiles, exclude)
+    srcdirs = filter_files(srcdirs, exclude)
+    dstdirs = filter_files(dstdirs, exclude)
     
     add,update,remove,metadata_repair_src,metadata_repair_dst = calculate_differences(srcfiles, dstfiles, srcpath, dstpath)
     add.sort()
@@ -250,6 +252,8 @@ if __name__ == '__main__':
             if args.empty:
                 _,srcdirs = list_files(srcpath)
                 _,dstdirs = list_files(dstpath)
+                srcdirs = filter_files(srcdirs, exclude)
+                dstdirs = filter_files(dstdirs, exclude)
                 remove_empty(srcdirs, srcpath, verbose=verbose>1, typ='src')
                 remove_empty(dstdirs, dstpath, verbose=verbose>1, typ='dst')
             if args.meta:
